@@ -1,0 +1,19 @@
+{
+  "name": "label-apollo",
+  "version": "1.0.0",
+  "description": "AI-powered image annotation tool for Cityscapes format",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "client": "cd frontend && npm start",
+    "server": "cd backend && python app.py",
+    "build": "cd frontend && npm run build",
+    "install-deps": "npm install && cd frontend && npm install && cd ../backend && pip install -r requirements.txt"
+  },
+  "keywords": ["annotation", "cityscapes", "segmentation", "ai", "machine-learning"],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
