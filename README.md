@@ -18,8 +18,8 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/yourusername/image-annotation-tool.git
-cd image-annotation-tool
+git clone https://github.com/lckcjdn/labelApollo.git
+cd labelApollo
 ```
 
 ### 2. 后端安装
