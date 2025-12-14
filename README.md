@@ -30,9 +30,34 @@ cd labelApollo
 
 #### 安装依赖
 
+
+1. **创建虚拟环境**
+
 ```bash
-pip install -r requirements.txt
+conda create -n labelApollo python=3.9
 ```
+
+2. **激活虚拟环境**
+
+```bash
+# Windows/macOS/Linux
+conda activate labelApollo
+```
+
+3. **安装依赖**（两种方法都执行此步骤）
+
+```bash
+# 完整版本（包含自动分割功能所需的SAM模型依赖）
+pip install -r requirements.txt
+
+# 轻量化版本（不包含自动分割功能，仅基本标注功能）
+pip install -r requirements_easy.txt
+```
+
+**注意**：
+- 如果您不需要使用自动分割功能，可以选择安装轻量化版本，节省安装时间和磁盘空间
+- 轻量化版本不包含PyTorch和Segment Anything Model (SAM)相关依赖
+- 使用轻量化版本时，自动分割功能将不可用
 
 ### 3. 前端安装
 
