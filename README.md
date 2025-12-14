@@ -44,14 +44,10 @@ conda create -n labelApollo python=3.9
 conda activate labelApollo
 ```
 
-3. **安装依赖**（两种方法都执行此步骤）
+3. **安装依赖**
 
 ```bash
-# 完整版本（包含自动分割功能所需的SAM模型依赖）
 pip install -r requirements.txt
-
-# 轻量化版本（不包含自动分割功能，仅基本标注功能）
-pip install -r requirements_easy.txt
 ```
 
 **注意**：
