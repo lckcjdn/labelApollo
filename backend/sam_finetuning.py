@@ -18,6 +18,12 @@ from typing import List, Dict, Tuple, Optional
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
+# 自定义过滤器，忽略特定的警告消息
+class IgnoreFileNotFoundWarning(logging.Filter):
+    def filter(self, record):
+        # 忽略包含"文件不存在或不是文件"的警告消息
+        return "文件不存在或不是文件" not in record.getMessage()
+
 from segment_anything import sam_model_registry
 from sam_model import SAMModel
 
@@ -54,7 +60,8 @@ class SAMFinetuningDataset(Dataset):
         # 加载掩码
         mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         
-        # 确保掩码为二值
+        # 过滤掉id为0的背景类别，只保留正样本（非背景类别）
+        # 正样本设置为1，背景设置为0
         mask = (mask > 0).astype(np.uint8)
         
         # 调整图像尺寸
@@ -74,19 +81,59 @@ class SAMFinetuningDataset(Dataset):
         }
 
 
+class DiceLoss(nn.Module):
+    """Dice损失函数实现"""
+    
+    def __init__(self, smooth=1e-6):
+        """
+        初始化Dice损失
+        
+        Args:
+            smooth: 平滑参数，避免除零错误
+        """
+        super(DiceLoss, self).__init__()
+        self.smooth = smooth
+    
+    def forward(self, inputs, targets):
+        """
+        计算Dice损失
+        
+        Args:
+            inputs: 模型输出 (未经sigmoid激活)
+            targets: 目标掩码
+        
+        Returns:
+            Dice损失值
+        """
+        # 应用sigmoid激活函数
+        inputs = torch.sigmoid(inputs)
+        
+        # 计算交集
+        intersection = (inputs * targets).sum()
+        
+        # 计算Dice系数
+        dice = (2. * intersection + self.smooth) / (inputs.sum() + targets.sum() + self.smooth)
+        
+        # 返回1-dice作为损失
+        return 1 - dice
+
 class SAMFinetuner:
     """SAM模型微调器"""
     
-    def __init__(self, model_type="vit_b", device=None):
+    def __init__(self, model_type="vit_b", device=None, lambda_ce=0.5, lambda_dice=0.5):
         """
         初始化微调器
         
         Args:
             model_type: SAM模型类型
             device: 训练设备
+            lambda_ce: CE损失的权重
+            lambda_dice: Dice损失的权重
         """
         self.model_type = model_type
         self.device = device if device else ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.lambda_ce = lambda_ce
+        self.lambda_dice = lambda_dice
         
         # 加载预训练SAM模型
         self.model = sam_model_registry[model_type]()
@@ -106,7 +153,13 @@ class SAMFinetuner:
         self.model.train()
         
         # 定义损失函数和优化器
-        self.criterion = nn.BCEWithLogitsLoss()  # 用于二值分割
+        # 使用带权重的BCEWithLogitsLoss，给正样本更高的权重
+        # pos_weight参数设置为2.0，表示正样本的权重是负样本的两倍
+        # 确保pos_weight在正确的设备上
+        pos_weight = torch.tensor([2.0], device=self.device)
+        self.ce_criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)  # CE损失
+        self.dice_criterion = DiceLoss().to(self.device)  # Dice损失
+        
         self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-5, weight_decay=0.01)
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=100)
         
@@ -160,7 +213,8 @@ class SAMFinetuner:
                             'mask_path': annotation_path
                         })
                     else:
-                        logging.warning(f"文件不存在或不是文件: {image_path} 或 {annotation_path}")
+                        # 只记录错误级别，避免警告消息
+                        logging.debug(f"文件不存在或不是文件: {image_path} 或 {annotation_path}")
                 else:
                     logging.warning(f"无效的路径信息: {image_path} 或 {annotation_path}, 数据项: {item}")
                     
@@ -262,24 +316,49 @@ class SAMFinetuner:
                             mode='bilinear',
                             align_corners=False
                         ).squeeze(1)  # 移除通道维度 (1, 1024, 1024)
-                        loss = self.criterion(pred_masks, single_mask.float())
-                        losses.append(loss)
+                        
+                        # 创建正样本掩码
+                        positive_mask = single_mask.float() > 0
+                        
+                        if positive_mask.sum() > 0:  # 确保存在正样本
+                            # 只在正样本区域计算损失
+                            pred_pos = pred_masks[positive_mask]
+                            target_pos = single_mask.float()[positive_mask]
+                            
+                            # 计算CE损失
+                            ce_loss = self.ce_criterion(pred_pos, target_pos)
+                            
+                            # 计算Dice损失（需要在正样本区域计算）
+                            # 为Dice损失创建完整尺寸的预测和目标，只在正样本区域有值
+                            pred_full = torch.zeros_like(pred_masks)
+                            target_full = torch.zeros_like(single_mask.float())
+                            pred_full[positive_mask] = pred_masks[positive_mask]
+                            target_full[positive_mask] = single_mask.float()[positive_mask]
+                            
+                            dice_loss = self.dice_criterion(pred_full, target_full)
+                            
+                            # 融合两种损失
+                            loss = self.lambda_ce * ce_loss + self.lambda_dice * dice_loss
+                            losses.append(loss)
+                        # 如果没有正样本，不添加损失项（后续会检查losses是否为空）
                     except Exception as e:
                         logging.error(f"批次 {batch_idx} 样本 {i} 训练失败: {e}")
                         import traceback
                         traceback.print_exc()
                         continue
                 
-                if losses:
+                if losses:  # 只有当存在损失项时才进行反向传播
                     batch_loss = torch.stack(losses).mean()
+                    
+                    # 反向传播
+                    batch_loss.backward()
+                    self.optimizer.step()
+                    
+                    total_loss += batch_loss.item()
                 else:
-                    continue
-                
-                # 反向传播
-                batch_loss.backward()
-                self.optimizer.step()
-                
-                total_loss += batch_loss.item()
+                    # 如果当前批次没有正样本，跳过反向传播
+                    # 这样可以避免梯度计算错误
+                    pass
             
             # 打印进度
             if batch_idx % 10 == 0:
@@ -314,6 +393,13 @@ class SAMFinetuner:
         # 训练循环
         train_losses = []
         
+        # 默认保存路径
+        if save_path is None:
+            save_path = f"models/sam_{self.model_type}_finetuned.pth"
+        
+        # 确保保存目录存在
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
         for epoch in range(epochs):
             logging.info(f"开始训练 Epoch {epoch+1}/{epochs}")
             
@@ -325,13 +411,16 @@ class SAMFinetuner:
             self.scheduler.step()
             
             logging.info(f"Epoch {epoch+1}/{epochs} 完成, 平均损失: {avg_loss:.4f}")
+            
+            # 每5个epoch保存一次模型
+            if (epoch + 1) % 5 == 0:
+                epoch_save_path = f"{os.path.splitext(save_path)[0]}_epoch_{epoch+1}.pth"
+                torch.save(self.model.state_dict(), epoch_save_path)
+                logging.info(f"模型在第 {epoch+1} 轮保存: {epoch_save_path}")
         
-        # 保存微调后的模型
-        if save_path is None:
-            save_path = f"models/sam_{self.model_type}_finetuned.pth"
-        
+        # 训练结束后保存最终模型
         torch.save(self.model.state_dict(), save_path)
-        logging.info(f"微调模型已保存: {save_path}")
+        logging.info(f"最终微调模型已保存: {save_path}")
         
         return {
             'epochs': epochs,
@@ -433,8 +522,12 @@ def create_sam_finetuning_api():
 
 
 if __name__ == "__main__":
-    # 测试代码
+    
+    # 配置日志，忽略文件不存在的警告
     logging.basicConfig(level=logging.INFO)
+    # 获取根记录器并添加过滤器
+    root_logger = logging.getLogger()
+    root_logger.addFilter(IgnoreFileNotFoundWarning())
     
     # 解析命令行参数
     import argparse
@@ -444,12 +537,15 @@ if __name__ == "__main__":
     parser.add_argument('--model_output', type=str, required=True, help='微调后模型输出路径')
     parser.add_argument('--model_type', type=str, default='vit_b', help='模型类型: vit_h, vit_l, vit_b')
     parser.add_argument('--device', type=str, default=None, help='运行设备: cuda或cpu')
-    parser.add_argument('--epochs', type=int, default=10, help='训练轮数')
+    parser.add_argument('--epochs', type=int, default=20, help='训练轮数')
     parser.add_argument('--batch_size', type=int, default=2, help='批次大小')
+    parser.add_argument('--lambda_ce', type=float, default=0.5, help='CE损失的权重')
+    parser.add_argument('--lambda_dice', type=float, default=0.5, help='Dice损失的权重')
     args = parser.parse_args()
     
-    # 创建微调器
-    finetuner = SAMFinetuner(model_type=args.model_type, device=args.device)
+    
+    finetuner = SAMFinetuner(model_type=args.model_type, device=args.device, 
+                           lambda_ce=args.lambda_ce, lambda_dice=args.lambda_dice)
     
     # 检查输入目录是否存在
     if not os.path.exists(args.images_dir):

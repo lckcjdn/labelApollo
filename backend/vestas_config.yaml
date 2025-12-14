@@ -1,0 +1,31 @@
+# Vestas 数据集标注配置
+labels:
+  - car
+  - human
+  - road
+  - lane_mark
+  - curb
+  - road_mark
+  - guard_rail
+  - traffic_sign
+
+# Vestas类别对应的颜色
+label_colors:
+  background: [0, 0, 0]
+  car: [0, 60, 100]
+  human: [220, 20, 60]
+  road: [128, 64, 128]
+  lane_mark: [255, 255, 255]
+  curb: [196, 196, 196]
+  road_mark: [250, 170, 11]
+  guard_rail: [51, 0, 255]
+  traffic_sign: [220, 220, 0]
+
+# AI模型配置
+aio:
+  default: 'Efficientsam (accuracy)'
+
+# 其他配置
+auto_save: true
+keep_prev: false
+sort_labels: true

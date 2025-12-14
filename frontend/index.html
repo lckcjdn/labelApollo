@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图像标注工具 - LabelApollo</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="annotation-tool">
+        <!-- 顶部工具栏 -->
+        <div class="top-toolbar">
+            <h1>LabelApollo - 图像标注工具</h1>
+            <div class="toolbar-buttons">
+                <button id="open-folder-btn">打开目录</button>
+                <button id="save-btn">保存标注</button>
+                <div class="auto-annotate-controls">
+                    <select id="model-select">
+                        <option value="models/sam_finetuned.pth">微调模型</option>
+                        <option value="models/sam_default.pth">默认模型</option>
+                    </select>
+                    <div class="confidence-control">
+                        <label for="confidence-slider">置信度:</label>
+                        <input type="range" id="confidence-slider" min="0.1" max="1.0" step="0.05" value="0.8">
+                        <span id="confidence-value">0.8</span>
+                    </div>
+                    <button id="auto-annotate-btn">自动标注</button>
+                </div>
+                <button id="prev-btn">上一张</button>
+                <button id="next-btn">下一张</button>
+            </div>
+        </div>
+
+        <!-- 主内容区域 -->
+        <div class="main-content">
+            <!-- 左侧文件浏览器 -->
+            <div class="file-browser">
+                <h3>图像列表</h3>
+                <div id="file-list-container">
+                    <ul id="file-list">
+                        <!-- 文件列表将通过JavaScript生成 -->
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 中间画布区域 -->
+            <div class="canvas-container">
+                <div id="canvas-wrapper">
+                    <canvas id="annotation-canvas"></canvas>
+                </div>
+            </div>
+
+            <!-- 右侧标注信息面板 -->
+            <div class="annotation-info">
+                <h3>标注信息</h3>
+                
+                <!-- 类别选择 -->
+                <div class="category-section">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <h3>选择类别</h3>
+                        <button id="add-category-btn" class="btn btn-secondary">添加类别</button>
+                        <input type="file" id="import-categories-file" style="display: none;" accept=".json">
+                        <button id="import-category-btn" class="btn btn-secondary">导入类别</button>
+                        <input type="file" id="load-config-file" style="display: none;" accept=".yaml,.yml">
+                        <button id="load-config-btn" class="btn btn-secondary">加载配置</button>
+                    </div>
+                    <div id="category-select" class="category-list">
+                        <div class="category-item active" data-value="car">汽车</div>
+                        <div class="category-item" data-value="person">行人</div>
+                        <div class="category-item" data-value="bike">自行车</div>
+                        <div class="category-item" data-value="traffic_light">交通信号灯</div>
+                        <div class="category-item" data-value="road">道路</div>
+                        <div class="category-item" data-value="building">建筑物</div>
+                    </div>
+                </div>
+
+                <!-- 标注工具 -->
+                <div class="tool-section">
+                    <h4>标注工具</h4>
+                    <button class="tool-btn active" id="draw-tool">绘制多边形</button>
+                    <button class="tool-btn" id="edit-tool">编辑顶点</button>
+                    <button class="tool-btn" id="delete-tool">删除标注</button>
+                    <button class="tool-btn" id="pan-tool">平移图像</button>
+                </div>
+
+                <!-- 当前标注信息 -->
+                <div class="current-annotation">
+                    <h4>当前标注</h4>
+                    <div id="annotation-details">
+                        <p>无标注选择</p>
+                    </div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div class="stats-section">
+                    <h4>统计</h4>
+                    <p>已标注: <span id="annotated-count">0</span></p>
+                    <p>未标注: <span id="unannotated-count">0</span></p>
+                    <p>总图像: <span id="total-count">0</span></p>
+                </div>
+
+                <!-- 快捷键说明 -->
+                <div class="shortcuts-section">
+                    <h4>快捷键</h4>
+                    <table class="shortcuts-table">
+                        <tr>
+                            <td class="shortcut-key">Ctrl + 鼠标滚轮</td>
+                            <td>缩放图像</td>
+                        </tr>
+                        <tr>
+                            <td class="shortcut-key">Ctrl + S</td>
+                            <td>保存标注</td>
+                        </tr>
+                        <tr>
+                            <td class="shortcut-key">空格 + 拖动</td>
+                            <td>平移图像</td>
+                        </tr>
+                        <tr>
+                            <td class="shortcut-key">P / 4</td>
+                            <td>切换平移工具</td>
+                        </tr>
+                        <tr>
+                            <td class="shortcut-key">D / 1</td>
+                            <td>切换绘制工具</td>
+                        </tr>
+                        <tr>
+                            <td class="shortcut-key">E / 2</td>
+                            <td>切换编辑工具</td>
+                        </tr>
+                        <tr>
+                            <td class="shortcut-key">3</td>
+                            <td>切换删除工具</td>
+                        </tr>
+                        <tr>
+                            <td class="shortcut-key">Delete / Backspace</td>
+                            <td>删除标注或顶点</td>
+                        </tr>
+                        <tr>
+                            <td class="shortcut-key">Escape</td>
+                            <td>取消绘制</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部状态栏 -->
+        <div class="status-bar">
+            <span id="current-file-info">未选择文件</span>
+            <span id="canvas-info">画布: 0x0</span>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

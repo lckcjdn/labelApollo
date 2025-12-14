@@ -60,11 +60,15 @@ Thumbs.db
 
 # Application specific
 uploads/
+!backend/uploads/
 annotations/
 models/
 *.pth
 *.pkl
 *.joblib
+Artest/
+apo/
+*.json
 
 # Temporary files
 *.tmp

@@ -1,0 +1,45 @@
+# Apollo 15类标注配置
+labels:
+  - s_w_d
+  - s_y_d
+  - ds_y_dn
+  - sb_w_do
+  - sb_y_do
+  - b_w_g
+  - s_w_s
+  - s_*_c
+  - s_w_p
+  - c_wy_z
+  - a_w_*
+  - b_n_sr
+  - d_wy_za
+  - r_wy_np
+  - vom_*_n
+
+# Apollo类别对应的颜色（根据你提供的RGB值）
+label_colors:
+  background: [0, 0, 0]
+  s_w_d: [70, 130, 180]
+  s_y_d: [220, 20, 60]
+  ds_y_dn: [255, 0, 0]
+  sb_w_do: [0, 0, 60]
+  sb_y_do: [0, 60, 100]
+  b_w_g: [0, 0, 142]
+  s_w_s: [220, 220, 0]
+  s_*_c: [102, 102, 156]
+  s_w_p: [128, 64, 128]
+  c_wy_z: [190, 153, 153]
+  a_w_*: [0, 0, 230]
+  b_n_sr: [255, 128, 0]
+  d_wy_za: [0, 255, 255]
+  r_wy_np: [178, 132, 190]
+  vom_*_n: [128, 128, 64]
+
+# AI模型配置
+aio:
+  default: 'Efficientsam (accuracy)'
+
+# 其他配置
+auto_save: true
+keep_prev: false
+sort_labels: true
