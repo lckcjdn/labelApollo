@@ -50,11 +50,6 @@ conda activate labelApollo
 pip install -r requirements.txt
 ```
 
-**注意**：
-- 如果您不需要使用自动分割功能，可以选择安装轻量化版本，节省安装时间和磁盘空间
-- 轻量化版本不包含PyTorch和Segment Anything Model (SAM)相关依赖
-- 使用轻量化版本时，自动分割功能将不可用
-
 ### 3. 前端安装
 
 前端无需特殊安装，直接在浏览器中打开即可。
