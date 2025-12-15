@@ -1,4 +1,5 @@
 # Vestas 数据集标注配置
+#转换时需将background类别添加到labels中，标注时将其在labels中删除。
 labels:
   - car
   - human

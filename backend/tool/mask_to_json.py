@@ -12,7 +12,7 @@ def mask_to_json(mask_path, classes_path, output_path=None):
     
     参数：
     mask_path: PNG掩码文件路径
-    classes_path: 类别定义JSON文件路径
+    classes_path: 类别定义config.yaml文件路径
     output_path: 输出JSON文件路径
     """
     # 检查文件名是否以_mask.png结尾
@@ -143,7 +143,6 @@ if __name__ == "__main__":
                 if file.endswith('_mask.png') and '_colored_mask.png' not in file:
                     mask_files.append(os.path.join(args.mask_path, file))
             print(f"找到 {len(mask_files)} 个符合条件的掩码文件")
-            
             for mask_file in mask_files:
                 # 生成输出文件路径
                 base_name = os.path.splitext(os.path.basename(mask_file))[0]

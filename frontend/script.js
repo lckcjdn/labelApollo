@@ -198,11 +198,11 @@ class ImageAnnotationTool {
             }
         });
         
-        // 只添加非PNG图像文件（不加载PNG图像）
-        const nonPngImageFiles = files.filter(file => 
-            file.type.startsWith('image/') && !file.name.endsWith('.png')
-        );
-        imageFiles.push(...nonPngImageFiles);
+        // 添加所有图像文件（包括PNG）
+      const allImageFiles = files.filter(file =>
+        file.type.startsWith('image/')
+      )
+      imageFiles.push(...allImageFiles);
         
         // 尝试获取文件的完整路径（受浏览器安全限制）
         this.images = imageFiles.map(file => {
@@ -231,10 +231,10 @@ class ImageAnnotationTool {
             this.loadLabelMeAnnotations(jsonFiles);
         }
         
-        // 加载对应的PNG标注
-        if (pngFiles.length > 0) {
-            this.loadPNGAnnotation(pngFiles);
-        }
+        // 不加载PNG标注文件，只加载JSON标注文件
+        // if (pngFiles.length > 0) {
+        //     this.loadPNGAnnotation(pngFiles);
+        // }
         
         if (imageFiles.length > 0) {
             this.currentImageIndex = 0;
@@ -340,45 +340,11 @@ class ImageAnnotationTool {
                     this.redraw();
                 }, 100);
             } else if (type === 'png') {
-                // 处理PNG格式标注
-                const image = new Image();
-                image.onload = () => {
-                    // 创建临时画布处理PNG标注
-                    const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = image.width;
-                    tempCanvas.height = image.height;
-                    const tempCtx = tempCanvas.getContext('2d');
-                    tempCtx.drawImage(image, 0, 0);
-                    
-                    // 获取图像数据
-                    const imageData = tempCtx.getImageData(0, 0, image.width, image.height);
-                    const data = imageData.data;
-                    
-                    // 从PNG mask中提取标注信息
-                    // 注：这里简化处理，实际应用中需要实现更复杂的多边形提取算法
-                    const annotations = [];
-                    
-                    // 遍历图像数据，查找非零区域（这里是一个简化实现）
-                    // 实际应该使用轮廓提取算法来生成多边形
-                    // 由于缺少完整的多边形提取逻辑，我们创建一个简单的标记
-                    this.annotations[imageName] = [{ 
-                        id: Date.now() + Math.random() * 1000,
-                        classId: 'from_png_mask',
-                        mask_data: data, // 保存原始图像数据数组
-                        points: [], // 实际应用中应该填充从mask中提取的多边形点
-                        timestamp: new Date().toISOString()
-                    }];
-                    
-                    console.log(`保存了PNG掩码数据，需要实现多边形提取逻辑`);
-                    
-                    console.log(`Loaded PNG annotation for ${imageName}`);
-                    
-                    // 更新界面
-                    this.updateFileList();
-                    this.updateStats();
-                    this.redraw();
-                };
-                image.src = `data:image/png;base64,${data}`;
+                // 处理PNG格式标注 - 但根据用户需求，现在不再需要加载PNG标注
+                console.log(`检测到PNG标注文件，但根据需求不再加载PNG标注`);
+                // 可以选择直接跳过处理，或者给用户一个提示
+                // 由于用户明确表示不需要PNG标注，我们可以简单地记录一下并跳过
+                // 这样可以避免后续的绘制错误
             }
             
             // 更新界面
@@ -391,14 +357,16 @@ class ImageAnnotationTool {
         }
     }
     
-    // 加载标注文件（支持JSON和PNG格式）
+    // 加载标注文件（仅支持JSON格式）
     loadAnnotations(files) {
         files.forEach(file => {
             // 根据文件扩展名判断格式
             if (file.name.endsWith('.json')) {
                 this.loadLabelMeAnnotations([file]);
             } else if (file.name.endsWith('.png')) {
-                this.loadPNGAnnotation([file]);
+                console.warn(`不支持加载PNG格式的标注文件: ${file.name}`);
+                // 不再加载PNG标注文件
+                // this.loadPNGAnnotation([file]);
             } else {
                 alert(`不支持的文件格式: ${file.name}`);
             }
@@ -1398,6 +1366,11 @@ class ImageAnnotationTool {
         const color = this.getCategoryColor(polygon.classId);
         const isCurrentSelected = this.selectedPolygon === polygon;
         const borderWidth = isCurrentSelected ? 3 : 2;
+
+        // 检查points数组是否为空
+        if (!polygon.points || polygon.points.length < 3) {
+            return; // 至少需要3个点才能绘制多边形
+        }
 
         // 绘制多边形填充
         this.ctx.beginPath();

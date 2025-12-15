@@ -245,21 +245,14 @@ def get_classes():
     dataset_type = request.args.get('dataset', 'apollo')
     
     if dataset_type == 'apollo':
-        # 过滤掉id为0的背景类别
-        filtered_classes = {k: v for k, v in APOLLO_CLASSES.items() if k != 0}
-        filtered_colors = {k: v for k, v in APOLLO_COLORS.items() if k != 0}
         return jsonify({
-            'classes': filtered_classes,
-            'colors': filtered_colors
+            'classes': APOLLO_CLASSES,
+            'colors': APOLLO_COLORS
         })
     else:
-        # 对于Cityscapes数据集也过滤掉id为0的类别（如果需要的话）
-        # 这里假设Cityscapes的id=0可能也需要过滤，根据实际需求调整
-        filtered_classes = {k: v for k, v in CITYSCAPES_CLASSES.items() if k != 0}
-        filtered_colors = {k: v for k, v in CITYSCAPES_COLORS.items() if k != 0}
         return jsonify({
-            'classes': filtered_classes,
-            'colors': filtered_colors
+            'classes': CITYSCAPES_CLASSES,
+            'colors': CITYSCAPES_COLORS
         })
 
 @app.route('/api/load_config', methods=['POST'])
@@ -404,12 +397,11 @@ def upload_image():
 
 @app.route('/api/images', methods=['GET'])
 def get_images():
-    """获取已上传的图像列表（不包括PNG图像）"""
+    """获取已上传的图像列表"""
     try:
         images = []
         for filename in os.listdir(UPLOAD_FOLDER):
-            # 不包含PNG图像，只返回JPG和JPEG格式
-            if filename.lower().endswith(('.jpg', '.jpeg')):
+            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                 annotation_status = check_annotation_status(filename, UPLOAD_FOLDER)
                 images.append({
                     'filename': filename,
@@ -437,8 +429,7 @@ def browse_directory():
         
         # 获取目录中的图像文件
         image_files = []
-        # 不包含PNG图像，只支持非PNG格式
-        supported_extensions = ('.jpg', '.jpeg', '.bmp', '.tiff', '.tif')
+        supported_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif')
         
         try:
             for filename in os.listdir(directory_path):
@@ -714,20 +705,9 @@ def predict_segmentation():
             try:
                 print(f"[API] 使用SAM模型预测，模型类型: {model_type}")
                 
-                # 获取SAM模型实例（延迟加载）
+                # 获取SAM模型实例
                 try:
-                    sam = get_sam_model(model_type=model_type, lazy_load=True)
-                    
-                    # 检查模型是否已加载，如果没有则加载
-                    if sam is not None and not sam.is_loaded():
-                        print("[DEBUG] SAM模型未加载，尝试加载模型")
-                        try:
-                            sam._load_model(force_download=True)
-                            print("[DEBUG] SAM模型加载成功")
-                        except Exception as e:
-                            print(f"[DEBUG] 加载SAM模型失败: {e}")
-                            return jsonify({'error': f'Failed to load SAM model: {str(e)}，请先调用/sam_init'}), 500
-                            
+                    sam = get_sam_model(model_type=model_type)
                     if sam.model is None or sam.predictor is None:
                         return jsonify({'error': 'SAM模型未正确初始化，请先调用/sam_init'}), 500
                 except Exception as e:
@@ -900,7 +880,57 @@ def save_annotation():
         with open(annotation_json_path, 'w') as f:
             json.dump(annotation_json, f, indent=2)
         
-
+        # 保存PNG掩码格式标注（如果提供）
+        if annotation_mask:
+            # 从base64编码的data URL提取PNG数据
+            if annotation_mask.startswith('data:image/png;base64,'):
+                base64_data = annotation_mask.replace('data:image/png;base64,', '')
+                # 解码base64数据
+                image_data = base64.b64decode(base64_data)
+                
+                # 创建PIL图像
+                image = Image.open(io.BytesIO(image_data))
+                
+                # 确保图像格式正确：未标注区域为0，已标注区域为类别ID
+                # 转换为numpy数组进行处理
+                mask_array = np.array(image)
+                
+                # 如果是RGB图像，转换为单通道灰度图
+                if len(mask_array.shape) == 3 and mask_array.shape[2] == 3:
+                    # 简单处理：取第一个通道的值作为类别ID
+                    mask_array = mask_array[:, :, 0]
+                elif len(mask_array.shape) == 3 and mask_array.shape[2] == 4:
+                    # 如果有alpha通道，只取RGB部分的第一个通道
+                    mask_array = mask_array[:, :, 0]
+                
+                # 确保背景像素值为0，已标注区域为类别ID
+                # 这里假设前端已经正确生成了掩码，但我们进行二次验证
+                # 将非零像素视为已标注区域，保留其值作为类别ID
+                # 确保所有像素值都是整数类型
+                mask_array = mask_array.astype(np.uint8)
+                
+                # 转换回PIL图像
+                processed_image = Image.fromarray(mask_array, mode='L')  # L模式表示8位灰度图
+                
+                # 保存为PNG文件
+                annotation_png_filename = f"{base_name}.png"
+                annotation_png_path = os.path.join(image_dir, annotation_png_filename)
+                processed_image.save(annotation_png_path, 'PNG')
+                
+                # 记录保存路径和格式验证信息
+                unique_values = np.unique(mask_array)
+                print(f"Saved PNG annotation to: {annotation_png_path}")
+                print(f"PNG mask format verification: background value=0, annotated values={list(unique_values[unique_values != 0])}")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Annotation saved successfully in PNG format',
+                    'annotation_json_path': annotation_json_path,
+                    'annotation_png_path': annotation_png_path,
+                    'image_directory': image_dir,
+                    'image_filename': image_filename,
+                    'mask_format_verified': True
+                })
         
         # 记录保存路径
         print(f"Saved JSON annotation to: {annotation_json_path}")
@@ -961,54 +991,22 @@ def load_annotation():
             # 使用前端提供的图像文件名
             base_name = os.path.splitext(image_filename)[0]
             
-            # 直接查找标注文件，尝试多个可能的目录
-            possible_dirs = []
-            
             # 优先使用前端提供的输出目录
-            if output_folder:
-                if os.path.isabs(output_folder):
-                    possible_dirs.append(output_folder)
-                else:
-                    # 如果是相对路径，尝试多种组合
-                    possible_dirs.append(os.path.join(os.getcwd(), output_folder))
-                    possible_dirs.append(os.path.join(os.getcwd(), UPLOAD_FOLDER, output_folder))
-            
-            # 添加其他可能的目录
-            possible_dirs.append(UPLOAD_FOLDER)
-            possible_dirs.append(ANNOTATIONS_FOLDER)
-            possible_dirs.append(os.getcwd())
-            
-            # 如果有image_filepath的目录信息，也尝试一下
-            if image_filepath:
-                possible_dirs.append(os.path.dirname(image_filepath))
-            
-            # 去重
-            possible_dirs = list(set(possible_dirs))
-            
-            # 查找包含标注文件的目录
-            image_dir = None
-            for dir_path in possible_dirs:
-                json_path_candidate = os.path.join(dir_path, f"{base_name}.json")
-                png_path_candidate = os.path.join(dir_path, f"{base_name}.png")
-                
-                if os.path.exists(json_path_candidate) or os.path.exists(png_path_candidate):
-                    image_dir = dir_path
-                    print(f"Found annotation in directory: {image_dir}")
-                    break
-            
-            # 如果仍然没有找到，使用默认目录
-            if not image_dir:
-                # 优先使用提供的output_folder
-                if output_folder and os.path.isabs(output_folder):
-                    image_dir = output_folder
-                else:
-                    # 否则使用UPLOAD_FOLDER
-                    image_dir = UPLOAD_FOLDER
-                print(f"Using default directory: {image_dir}")
-        
-        # 初始化标注文件路径
-        json_path = None
-        png_path = None
+            if output_folder and os.path.isabs(output_folder):
+                image_dir = output_folder
+                print(f"Using provided output_folder: {image_dir}")
+            # 检查UPLOAD_FOLDER
+            elif os.path.exists(os.path.join(UPLOAD_FOLDER, image_filename)):
+                image_dir = UPLOAD_FOLDER
+                print(f"Using UPLOAD_FOLDER for image: {image_filename}")
+            # 尝试其他可能的目录
+            else:
+                # 先尝试当前工作目录
+                image_dir = os.getcwd()
+                # 然后尝试ANNOTATIONS_FOLDER
+                if not os.path.exists(os.path.join(image_dir, image_filename)):
+                    image_dir = ANNOTATIONS_FOLDER
+                print(f"Fallback to image_dir: {image_dir}")
         
         if base_name and image_dir:
             # 构建JSON和PNG标注文件路径
@@ -1034,13 +1032,18 @@ def load_annotation():
                     # 获取图像文件路径
                     img_path = os.path.join(image_dir, image_filename)
                     if os.path.exists(img_path):
-                        # 比较文件大小（简化判断）
-                        img_size = os.path.getsize(img_path)
-                        png_size = os.path.getsize(png_path)
-                        # 如果大小相近，可能是同一个文件
-                        if abs(img_size - png_size) < 1024:  # 小于1KB的差异视为同一文件
+                        # 检查路径是否完全相同
+                        if os.path.abspath(img_path) == os.path.abspath(png_path):
                             treat_as_annotation = False
-                            print(f"PNG file {png_path} appears to be the image file itself, not annotation")
+                            print(f"PNG file {png_path} is the image file itself, not annotation")
+                        # 比较文件大小（简化判断）
+                        else:
+                            img_size = os.path.getsize(img_path)
+                            png_size = os.path.getsize(png_path)
+                            # 如果大小相近，可能是同一个文件
+                            if abs(img_size - png_size) < 1024:  # 小于1KB的差异视为同一文件
+                                treat_as_annotation = False
+                                print(f"PNG file {png_path} appears to be the image file itself, not annotation")
                 except Exception as e:
                     print(f"Error checking PNG file: {e}")
             
@@ -1194,15 +1197,14 @@ def init_sam_model():
         data = request.get_json()
         model_type = data.get('model_type', 'vit_l')  # 默认使用vit_l
         device = data.get('device', None)  # 允许指定设备
-        lazy_load = data.get('lazy_load', True)  # 默认使用延迟加载
         
-        print(f"[API] 初始化SAM模型，类型: {model_type}，设备: {device}，延迟加载: {lazy_load}")
+        print(f"[API] 初始化SAM模型，类型: {model_type}，设备: {device}")
         
         # 获取SAM模型实例
-        sam = get_sam_model(model_type=model_type, device=device, lazy_load=lazy_load)
+        sam = get_sam_model(model_type=model_type, device=device)
         
         # 验证模型是否成功初始化
-        if sam.model is None and not lazy_load:
+        if sam.model is None:
             return jsonify({
                 'error': 'SAM模型初始化失败，内部状态为None',
                 'model_info': sam.get_model_info()
@@ -1210,16 +1212,12 @@ def init_sam_model():
         
         # 返回成功信息
         model_info = sam.get_model_info()
-        if sam.model is not None:
-            print(f"[API] SAM模型初始化成功: {model_info}")
-        else:
-            print(f"[API] SAM模型已准备好（延迟加载）: {model_info}")
+        print(f"[API] SAM模型初始化成功: {model_info}")
         
         return jsonify({
             'message': 'SAM model initialized successfully',
             'model_info': model_info,
-            'gpu_available': torch.cuda.is_available(),
-            'lazy_loaded': sam.model is None
+            'gpu_available': torch.cuda.is_available()
         })
     except ImportError as e:
         # 处理导入错误，通常是segment_anything库未安装
@@ -1264,14 +1262,7 @@ def sam_predict_with_points():
         try:
             sam = get_sam_model()
             if sam.model is None or sam.predictor is None:
-                # 模型处于延迟加载状态，尝试加载模型
-                print(f"[API] SAM模型处于延迟加载状态，尝试加载...")
-                try:
-                    sam._load_model(force_download=True)
-                    print(f"[API] SAM模型加载成功")
-                except Exception as load_error:
-                    print(f"[API] SAM模型加载失败: {load_error}")
-                    return jsonify({'error': f'SAM模型加载失败: {str(load_error)}，请先调用/sam_init'}), 500
+                return jsonify({'error': 'SAM模型未正确初始化，请先调用/sam_init'}), 500
         except Exception as e:
             print(f"[API] 获取SAM模型失败: {e}")
             return jsonify({'error': f'获取SAM模型失败: {str(e)}，请先调用/sam_init'}), 500
@@ -1363,14 +1354,7 @@ def sam_predict_with_box():
         try:
             sam = get_sam_model()
             if sam.model is None or sam.predictor is None:
-                # 模型处于延迟加载状态，尝试加载模型
-                print(f"[API] SAM模型处于延迟加载状态，尝试加载...")
-                try:
-                    sam._load_model(force_download=True)
-                    print(f"[API] SAM模型加载成功")
-                except Exception as load_error:
-                    print(f"[API] SAM模型加载失败: {load_error}")
-                    return jsonify({'error': f'SAM模型加载失败: {str(load_error)}，请先调用/sam_init'}), 500
+                return jsonify({'error': 'SAM模型未正确初始化，请先调用/sam_init'}), 500
         except Exception as e:
             print(f"[API] 获取SAM模型失败: {e}")
             return jsonify({'error': f'获取SAM模型失败: {str(e)}，请先调用/sam_init'}), 500
@@ -1534,17 +1518,6 @@ def auto_annotate():
         # 初始化SAM模型
         from sam_model import get_sam_model
         sam = get_sam_model(model_type=model_type)
-        
-        # 检查模型是否已经加载，如果没有则尝试加载
-        if sam.model is None:
-            print(f"[API] SAM模型处于延迟加载状态，尝试加载...")
-            try:
-                sam._load_model(force_download=True)
-                print(f"[API] SAM模型加载成功")
-            except Exception as load_error:
-                print(f"[API] SAM模型加载失败: {load_error}")
-                return jsonify({'error': f'SAM模型加载失败: {str(load_error)}'}), 500
-        
         sam.load_finetuned_model(model_path)
         
         # 创建输出目录
@@ -1692,185 +1665,6 @@ def load_finetuned_sam_model():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-@app.route('/api/auto_annotate_single', methods=['POST'])
-def auto_annotate_single():
-    """对单张图片进行自动标注"""
-    temp_image_path = None
-    sam = None
-    try:
-        print("[DEBUG] 接收到自动标注请求")
-        # 检查是否有文件上传
-        if 'image' not in request.files:
-            print("[ERROR] 没有提供图片文件")
-            return jsonify({'error': 'No image file provided'}), 400
-        
-        image_file = request.files['image']
-        model_path = request.form.get('model_path', 'models/sam_finetuned.pth')
-        model_type = request.form.get('model_type', 'vit_l')
-        confidence_threshold = float(request.form.get('confidence_threshold', 0.8))
-        print(f"[DEBUG] 参数: model_path={model_path}, model_type={model_type}, confidence_threshold={confidence_threshold}")
-        
-        # 保存上传的图片到临时文件
-        import tempfile
-        from PIL import Image
-        import io
-        import numpy as np
-        import cv2
-        from auto_annotate import auto_annotate_image, create_labelme_json
-        
-        # 读取图片
-        image = Image.open(image_file.stream)
-        image_array = np.array(image)
-        
-        # 初始化SAM模型（延迟加载）
-        print("[DEBUG] 初始化SAM模型")
-        sam = get_sam_model(model_type=model_type, lazy_load=True)
-        
-        # 检查模型是否已加载，如果没有则加载
-        if sam is not None and not sam.is_loaded():
-            print("[DEBUG] SAM模型未加载，尝试加载模型")
-            try:
-                sam._load_model(force_download=True)
-                print("[DEBUG] SAM模型加载成功")
-            except Exception as e:
-                print(f"[DEBUG] 加载SAM模型失败: {e}")
-                return jsonify({'error': f'Failed to load SAM model: {str(e)}'}), 500
-        
-        # 加载微调模型
-        print(f"[DEBUG] 检查模型文件: {model_path}")
-        if not os.path.exists(model_path):
-            # 尝试在模型目录下查找
-            if not os.path.isabs(model_path):
-                candidate_path = os.path.join(MODELS_FOLDER, model_path)
-                if os.path.exists(candidate_path):
-                    model_path = candidate_path
-                    print(f"[DEBUG] 找到模型文件: {model_path}")
-                else:
-                    print(f"[ERROR] 模型文件不存在: {model_path}")
-                    return jsonify({'error': f'微调模型文件不存在: {model_path}'}), 404
-            else:
-                print(f"[ERROR] 模型文件不存在: {model_path}")
-                return jsonify({'error': f'微调模型文件不存在: {model_path}'}), 404
-        
-        print("[DEBUG] 加载微调模型")
-        success = sam.load_finetuned_model(model_path)
-        if not success:
-            print("[ERROR] 加载微调模型失败")
-            return jsonify({'error': 'Failed to load finetuned model'}), 500
-        print("[DEBUG] 微调模型加载成功")
-        
-        # 创建数据增强转换
-        import albumentations as A
-        transform = A.Compose([
-            A.Resize(1024, 1024),
-        ])
-        
-        # 保存临时图片文件进行标注
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-            temp_image_path = tmp_file.name
-            image.save(temp_image_path)
-        
-        try:
-            # 执行自动标注
-            print("[DEBUG] 开始执行自动标注")
-            result = auto_annotate_image(temp_image_path, sam, transform, confidence_threshold)
-            
-            if result is None:
-                return jsonify({'error': 'Auto annotation failed'}), 500
-            
-            pred_mask, image_info = result
-            print("[DEBUG] 自动标注完成，成功获取掩码和图像信息")
-            
-            # 创建LabelMe格式的JSON数据
-            labelme_json = create_labelme_json(temp_image_path, pred_mask, image_info)
-            
-            # 处理多边形点，转换为前端需要的格式
-            polygons = []
-            for shape in labelme_json['shapes']:
-                # 将多边形点从[[x1,y1], [x2,y2], ...]格式转换为[x1,y1,x2,y2,...]格式
-                polygon_points = []
-                for point in shape['points']:
-                    polygon_points.extend([point[0], point[1]])
-                
-                polygons.append({
-                    'points': polygon_points,
-                    'classId': shape['label'],  # 可以根据需要修改类别
-                    'fillColor': 'rgba(255, 0, 0, 0.3)'  # 默认填充颜色
-                })
-            
-            return jsonify({
-                'success': True,
-                'polygons': polygons,
-                'message': 'Auto annotation completed successfully'
-            })
-        finally:
-            # 重要：清理图像特征缓存，释放内存
-            print("[DEBUG] 清理图像特征缓存")
-            try:
-                # 检查model是否有reset_image方法
-                if sam is not None and hasattr(sam, 'reset_image'):
-                    sam.reset_image()
-                    print("[DEBUG] SAM模型图像特征缓存已清理")
-                else:
-                    # 如果没有reset_image方法，尝试直接调用predictor的reset_image（如果存在）
-                    if sam is not None and hasattr(sam, 'predictor') and hasattr(sam.predictor, 'reset_image'):
-                        sam.predictor.reset_image()
-                        print("[DEBUG] SAM predictor图像特征缓存已清理")
-            except Exception as e:
-                print(f"[WARNING] 清理图像特征缓存失败: {e}")
-                
-            # 清理临时文件
-            if temp_image_path and os.path.exists(temp_image_path):
-                try:
-                    os.unlink(temp_image_path)
-                    print(f"[DEBUG] 临时文件已删除: {temp_image_path}")
-                except Exception as e:
-                    print(f"[WARNING] 删除临时文件失败: {str(e)}")
-        
-    except Exception as e:
-        print(f"[API] 自动标注失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-    finally:
-        # 在请求结束后尝试清理缓存，降低内存占用
-        try:
-            # 每处理5个请求，执行一次更彻底的清理
-            if not hasattr(app, 'annotation_request_count'):
-                app.annotation_request_count = 0
-            app.annotation_request_count += 1
-            
-            # 每处理5个请求清理一次缓存
-            if app.annotation_request_count % 5 == 0:
-                print("[DEBUG] 处理了5个请求，执行缓存清理")
-                
-                # 尝试获取SAM模型并清理缓存
-                try:
-                    if sam is not None and hasattr(sam, 'clear_cache'):
-                        sam.clear_cache()
-                        print("[DEBUG] 执行了模型缓存清理")
-                except:
-                    pass
-                
-                # 执行PyTorch缓存清理
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        print("[DEBUG] 执行了torch.cuda.empty_cache()")
-                except:
-                    pass
-                
-                # 执行Python垃圾回收
-                try:
-                    import gc
-                    gc.collect()
-                    print("[DEBUG] 执行了Python垃圾回收")
-                except:
-                    pass
-        except:
-            pass  # 确保清理过程不会影响正常响应
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
