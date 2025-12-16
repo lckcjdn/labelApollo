@@ -814,17 +814,39 @@ def save_annotation():
         if image_filepath:
             # 从image_filepath解析图像文件名和目录
             image_filepath = os.path.normpath(image_filepath)
-            # 确保路径是绝对路径
-            if not os.path.isabs(image_filepath):
-                # 尝试构建绝对路径
-                abs_path = os.path.abspath(image_filepath)
-                if os.path.exists(abs_path):
-                    image_filepath = abs_path
             
-            image_dir = os.path.dirname(image_filepath)
-            image_filename = os.path.basename(image_filepath)
-            base_name = os.path.splitext(image_filename)[0]
-            print(f"Using image_filepath: {image_filepath}, dir: {image_dir}, filename: {image_filename}")
+            # 如果有提供图像目录信息，优先使用它
+            if image_directory:
+                # 处理图像目录中的路径分隔符
+                image_directory = os.path.normpath(image_directory)
+                # 如果前端提供的是相对路径，结合image_directory构建完整路径
+                if not os.path.isabs(image_filepath):
+                    # 使用提供的image_directory作为基础目录
+                    image_dir = image_directory
+                    # 确保image_filepath只是文件名，避免路径拼接错误
+                    image_filename = os.path.basename(image_filepath)
+                    base_name = os.path.splitext(image_filename)[0]
+                    # 构建完整的image_filepath
+                    image_filepath = os.path.join(image_dir, image_filename)
+                    print(f"Using image_directory to build path: {image_filepath}, dir: {image_dir}, filename: {image_filename}")
+                else:
+                    # 如果image_filepath已经是绝对路径，使用它的目录
+                    image_dir = os.path.dirname(image_filepath)
+                    image_filename = os.path.basename(image_filepath)
+                    base_name = os.path.splitext(image_filename)[0]
+                    print(f"Using absolute image_filepath: {image_filepath}, dir: {image_dir}, filename: {image_filename}")
+            else:
+                # 没有提供图像目录信息，尝试构建绝对路径
+                if not os.path.isabs(image_filepath):
+                    # 尝试构建绝对路径
+                    abs_path = os.path.abspath(image_filepath)
+                    if os.path.exists(abs_path):
+                        image_filepath = abs_path
+                
+                image_dir = os.path.dirname(image_filepath)
+                image_filename = os.path.basename(image_filepath)
+                base_name = os.path.splitext(image_filename)[0]
+                print(f"Using image_filepath without directory info: {image_filepath}, dir: {image_dir}, filename: {image_filename}")
         elif image_filename:
             # 使用前端提供的图像文件名
             # 优先使用前端提供的图像目录

@@ -42,6 +42,7 @@ class ImageAnnotationTool {
         this.addCategoryBtn = document.getElementById('add-category-btn');
         this.importCategoryBtn = document.getElementById('import-category-btn');
         this.importCategoriesFile = document.getElementById('import-categories-file');
+        this.loadConfigBtn = document.getElementById('load-config-btn');
         // 初始化配置文件输入元素
         this.configFileInput = document.createElement('input');
         this.configFileInput.type = 'file';
@@ -84,6 +85,7 @@ class ImageAnnotationTool {
     initEventListeners() {
         // 工具栏按钮事件
         this.openFolderBtn.addEventListener('click', () => this.fileInput.click());
+        this.loadConfigBtn.addEventListener('click', () => this.loadConfigFile());
         this.saveBtn.addEventListener('click', () => this.saveAnnotations());
         this.autoAnnotateBtn.addEventListener('click', () => this.autoAnnotate());
         this.prevBtn.addEventListener('click', () => this.showPreviousImage());
@@ -206,6 +208,26 @@ class ImageAnnotationTool {
         
         // 尝试获取文件的完整路径（受浏览器安全限制）
         this.images = imageFiles.map(file => {
+            let filePath = file.name;
+            let directoryPath = '';
+            
+            // 尝试获取相对路径（当用户选择文件夹时）
+            if (file.webkitRelativePath) {
+                filePath = file.webkitRelativePath;
+                // 提取目录路径
+                const lastSlashIndex = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+                if (lastSlashIndex !== -1) {
+                    directoryPath = filePath.substring(0, lastSlashIndex + 1);
+                }
+            } else if (file.path) {
+                // 在某些非浏览器环境中可能可以获取完整路径
+                filePath = file.path;
+                const lastSlashIndex = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+                if (lastSlashIndex !== -1) {
+                    directoryPath = filePath.substring(0, lastSlashIndex + 1);
+                }
+            }
+            
             // 创建一个新的对象，包含原始文件和路径信息
             const imageObj = {
                 name: file.name,
@@ -213,7 +235,8 @@ class ImageAnnotationTool {
                 size: file.size,
                 lastModified: file.lastModified,
                 imageObject: null,
-                filePath: file.webkitRelativePath || file.name, // 尝试获取相对路径或使用文件名
+                filePath: filePath, // 保存完整路径或文件名
+                directoryPath: directoryPath, // 单独保存目录路径
                 file: file,
                 // 如果有对应的PNG标注文件，添加到图像对象中
                 annotationPNG: imageNameToPNGMap[file.name] || null
@@ -1781,8 +1804,10 @@ class ImageAnnotationTool {
         formData.append('image_filename', currentImageName);
         
         // 提取并添加图像目录信息，正确处理不同的路径分隔符
-        let imageDirectory = '';
-        if (currentImage.filePath) {
+        let imageDirectory = currentImage.directoryPath || '';
+        
+        // 如果没有directoryPath属性或者为空，尝试从filePath中提取
+        if (!imageDirectory && currentImage.filePath) {
             const lastSlashIndex = Math.max(
                 currentImage.filePath.lastIndexOf('/'),
                 currentImage.filePath.lastIndexOf('\\')
